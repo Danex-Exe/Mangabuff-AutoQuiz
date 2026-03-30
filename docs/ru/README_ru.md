@@ -1,3 +1,10 @@
+<h1 align="center">Documentation</h1>
+<div align="center">
+    <a href="./README.md">English</a>
+    <a href="README_ru.md">Русский</a>
+    <br><br>
+</div>
+
 # Mangabuff Quiz Auto Answer
 
 Скрипт для Tampermonkey, который автоматически проходит квизы на [mangabuff.ru/quiz](https://mangabuff.ru/quiz), отправляя правильные ответы на каждый вопрос.
