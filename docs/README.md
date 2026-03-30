@@ -1,7 +1,7 @@
 <h1 align="center">Documentation</h1>
 <div align="center">
     <a href="README.md">English</a>
-    <a href="ru/README_RU.md">Русский</a>
+    <a href="ru/README_ru.md">Русский</a>
     <br><br>
 </div>
 
