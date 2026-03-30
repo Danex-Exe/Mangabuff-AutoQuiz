@@ -1,6 +1,6 @@
 <h1 align="center">Documentation</h1>
 <div align="center">
-    <a href="./README.md">English</a>
+    <a href="../README.md">English</a>
     <a href="README_ru.md">Русский</a>
     <br><br>
 </div>
