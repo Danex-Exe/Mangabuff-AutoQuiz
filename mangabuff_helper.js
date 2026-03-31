@@ -1,5 +1,5 @@
 ﻿// ==UserScript==
-// @name         Mangabuff Helper
+// @name         Mangabuff-helper
 // @namespace    http://tampermonkey.net/
 // @version      2.0.0
 // @description  Autoquiz, autoscroll, automine and reader helpers for mangabuff.ru
@@ -35,11 +35,14 @@
   const defaults = {
     autoQuiz: false,
     autoScroll: false,
+    autoChapterSwitch: true,
+    autoLikes: true,
+    autoComments: true,
     autoMine: false,
     scrollStep: 260,
     scrollInterval: 1200,
+    commentEveryChapters: 2,
     chaptersSinceComment: 0,
-    chaptersUntilComment: randomCommentGap(),
     lastHandledChapterKey: '',
     lastLikedChapterKey: '',
     lastCommentedChapterKey: ''
@@ -56,16 +59,15 @@
     status: {
       autoQuiz: 'Ожидание',
       autoScroll: 'Ожидание',
+      autoChapterSwitch: 'Ожидание',
+      autoLikes: 'Ожидание',
+      autoComments: 'Ожидание',
       autoMine: 'Ожидание'
     }
   };
 
   let statusNodes = {};
   let controls = {};
-
-  function randomCommentGap() {
-    return Math.random() < 0.5 ? 2 : 4;
-  }
 
   function loadSettings() {
     try {
@@ -174,6 +176,9 @@
   function updateCheckboxes() {
     if (controls.autoQuiz) controls.autoQuiz.checked = settings.autoQuiz;
     if (controls.autoScroll) controls.autoScroll.checked = settings.autoScroll;
+    if (controls.autoChapterSwitch) controls.autoChapterSwitch.checked = settings.autoChapterSwitch;
+    if (controls.autoLikes) controls.autoLikes.checked = settings.autoLikes;
+    if (controls.autoComments) controls.autoComments.checked = settings.autoComments;
     if (controls.autoMine) controls.autoMine.checked = settings.autoMine;
     if (controls.scrollStep) controls.scrollStep.value = String(settings.scrollStep);
   }
@@ -208,6 +213,13 @@
       const text = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
       return link.rel === 'next' || text.includes('след');
     }) || null;
+  }
+
+  function updateReaderStatuses() {
+    setStatus('autoScroll', settings.autoScroll ? 'Прокрутка включена' : 'Выключен');
+    setStatus('autoChapterSwitch', settings.autoChapterSwitch ? 'Переход по главам включён' : 'Выключен');
+    setStatus('autoLikes', settings.autoLikes ? 'Лайки включены' : 'Выключен');
+    setStatus('autoComments', settings.autoComments ? `Комментарий раз в ${settings.commentEveryChapters} главы` : 'Выключен');
   }
 
   async function likeCurrentChapter() {
@@ -255,7 +267,7 @@
 
     settings.chaptersSinceComment += 1;
 
-    if (settings.chaptersSinceComment < settings.chaptersUntilComment) {
+    if (settings.chaptersSinceComment < settings.commentEveryChapters) {
       saveSettings();
       return false;
     }
@@ -278,14 +290,12 @@
     if (data && typeof data === 'object' && data.message) {
       console.warn('[Mangabuff Helper] Comment rejected:', data.message);
       settings.chaptersSinceComment = 0;
-      settings.chaptersUntilComment = randomCommentGap();
       settings.lastCommentedChapterKey = chapterKey;
       saveSettings();
       return false;
     }
 
     settings.chaptersSinceComment = 0;
-    settings.chaptersUntilComment = randomCommentGap();
     settings.lastCommentedChapterKey = chapterKey;
     saveSettings();
     console.debug('[Mangabuff Helper] Comment sent:', commentText, data);
@@ -293,7 +303,7 @@
   }
 
   async function handleReaderChapterEntry() {
-    if (!settings.autoScroll || !isReaderPage()) {
+    if (!isReaderPage() || (!settings.autoLikes && !settings.autoComments)) {
       return;
     }
 
@@ -305,16 +315,74 @@
     settings.lastHandledChapterKey = chapterKey;
     saveSettings();
 
-    try {
-      await likeCurrentChapter();
-    } catch (error) {
-      console.warn('[Mangabuff Helper] Like failed:', error);
+    if (settings.autoLikes) {
+      try {
+        await likeCurrentChapter();
+      } catch (error) {
+        console.warn('[Mangabuff Helper] Like failed:', error);
+      }
     }
 
-    try {
-      await maybeCommentCurrentChapter();
-    } catch (error) {
-      console.warn('[Mangabuff Helper] Comment failed:', error);
+    if (settings.autoComments) {
+      try {
+        await maybeCommentCurrentChapter();
+      } catch (error) {
+        console.warn('[Mangabuff Helper] Comment failed:', error);
+      }
+    }
+
+    updateReaderStatuses();
+  }
+
+  function maybeSwitchToNextChapter() {
+    if (!settings.autoChapterSwitch || runtime.navigatingToNextChapter || !isReaderPage()) {
+      return false;
+    }
+
+    const nextChapterLink = getNextChapterLink();
+    if (nextChapterLink?.href) {
+      runtime.navigatingToNextChapter = true;
+      setStatus('autoChapterSwitch', 'Переход к следующей главе');
+      window.location.href = nextChapterLink.href;
+      return true;
+    }
+
+    setStatus('autoChapterSwitch', 'Следующая глава не найдена');
+    return false;
+  }
+
+  function handleReaderBottomReach() {
+    if (!isReaderPage()) {
+      return;
+    }
+
+    const scrollHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    );
+    const isNearBottom = window.innerHeight + window.scrollY >= scrollHeight - 140;
+
+    if (!isNearBottom) {
+      runtime.bottomHits = 0;
+      return;
+    }
+
+    runtime.bottomHits += 1;
+    if (runtime.bottomHits < 3) {
+      return;
+    }
+
+    if (maybeSwitchToNextChapter() && settings.autoScroll) {
+      setStatus('autoScroll', 'Переход по главам');
+      return;
+    }
+
+    if (settings.autoScroll && settings.autoChapterSwitch) {
+      settings.autoScroll = false;
+      saveSettings();
+      updateCheckboxes();
+      stopAutoScroll();
+      setStatus('autoScroll', 'Автоскролл выключен');
     }
   }
 
@@ -342,36 +410,7 @@
 
       window.scrollBy(0, settings.scrollStep);
 
-      const scrollHeight = Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight
-      );
-      const isNearBottom = window.innerHeight + window.scrollY >= scrollHeight - 140;
-
-      if (!isNearBottom) {
-        runtime.bottomHits = 0;
-        return;
-      }
-
-      runtime.bottomHits += 1;
-
-      if (runtime.bottomHits < 3 || runtime.navigatingToNextChapter) {
-        return;
-      }
-
-      const nextChapterLink = getNextChapterLink();
-      if (nextChapterLink?.href) {
-        runtime.navigatingToNextChapter = true;
-        setStatus('autoScroll', 'Переход к следующей главе');
-        window.location.href = nextChapterLink.href;
-        return;
-      }
-
-      settings.autoScroll = false;
-      saveSettings();
-      updateCheckboxes();
-      stopAutoScroll();
-      setStatus('autoScroll', 'Следующая глава не найдена, автоскролл выключен');
+      handleReaderBottomReach();
     }, settings.scrollInterval);
   }
 
@@ -382,11 +421,7 @@
     }
     runtime.bottomHits = 0;
     runtime.navigatingToNextChapter = false;
-    if (settings.autoScroll) {
-      setStatus('autoScroll', 'Пауза');
-    } else {
-      setStatus('autoScroll', 'Выключен');
-    }
+    setStatus('autoScroll', settings.autoScroll ? 'Пауза' : 'Выключен');
   }
 
   async function sendMineHit() {
@@ -394,6 +429,8 @@
     xhr.open('POST', `${location.origin}/mine/hit`, true);
     xhr.withCredentials = true;
     xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    xhr.setRequestHeader('Accept', 'application/json, text/plain, */*');
 
     const csrfToken = getCsrfToken();
     if (csrfToken) {
@@ -415,11 +452,22 @@
           return;
         }
 
-        reject(new Error(`mine/hit returned ${xhr.status}`));
+        const error = new Error(`mine/hit returned ${xhr.status}`);
+        error.status = xhr.status;
+        error.data = data;
+        reject(error);
       };
 
-      xhr.onerror = () => reject(new Error('mine/hit request failed'));
-      xhr.send();
+      xhr.onerror = () => {
+        const error = new Error('mine/hit request failed');
+        error.status = 0;
+        reject(error);
+      };
+      const body = new URLSearchParams();
+      if (csrfToken) {
+        body.set('_token', csrfToken);
+      }
+      xhr.send(body.toString());
     });
   }
 
@@ -450,12 +498,23 @@
         await sendMineHit();
         setStatus('autoMine', 'Удар отправлен');
       } catch (error) {
-        console.warn('[Mangabuff Helper] AutoMine failed:', error);
+        const mineButton = document.querySelector('.main-mine__game-tap');
+        if (error?.status === 403 && mineButton && getComputedStyle(mineButton).display !== 'none') {
+          mineButton.click();
+          setStatus('autoMine', 'XHR 403, использую кнопку');
+          return;
+        }
+
+        if (error?.status === 403) {
+          console.info('[Mangabuff Helper] AutoMine got 403 and was disabled.');
+        } else {
+          console.warn('[Mangabuff Helper] AutoMine failed:', error);
+        }
         settings.autoMine = false;
         saveSettings();
         updateCheckboxes();
         stopAutoMine();
-        setStatus('autoMine', 'mine/hit вернул ошибку, автодобыча выключена');
+        setStatus('autoMine', error?.status === 403 ? 'mine/hit вернул 403' : 'mine/hit вернул ошибку');
       }
     }, 1500);
   }
@@ -510,10 +569,7 @@
 
   function scheduleAutoQuizRetry() {
     clearAutoQuizTimer();
-    if (!settings.autoQuiz || !isQuizPage()) {
-      if (settings.autoQuiz && !isQuizPage()) {
-        setStatus('autoQuiz', 'Ожидание страницы квиза');
-      }
+    if (!settings.autoQuiz) {
       return;
     }
 
@@ -530,11 +586,6 @@
       return;
     }
 
-    if (!isQuizPage()) {
-      setStatus('autoQuiz', 'Ожидание страницы квиза');
-      return;
-    }
-
     runtime.autoQuizRunning = true;
     setStatus('autoQuiz', 'Запускаю квиз');
 
@@ -547,8 +598,7 @@
 
       if (!data?.question?.correct_text) {
         runtime.autoQuizRunning = false;
-        setStatus('autoQuiz', 'Нет активного вопроса');
-        scheduleAutoQuizRetry();
+        setStatus('autoQuiz', isQuizPage() ? 'Нет активного вопроса' : 'Нет активного квиза');
         return;
       }
 
@@ -888,6 +938,11 @@
           stopAutoQuiz();
         }
       }
+
+      if (stateKey === 'autoChapterSwitch' || stateKey === 'autoLikes' || stateKey === 'autoComments') {
+        updateReaderStatuses();
+        handleReaderChapterEntry();
+      }
     });
 
     return card;
@@ -936,14 +991,35 @@
 
     body.appendChild(createFeatureCard({
       title: 'AutoScroll',
-      description: 'Прокручивает главы, ставит лайк, иногда пишет комментарий и сам открывает следующую главу до конца тайтла.',
+      description: 'Только прокручивает страницу главы вниз с заданной силой и интервалом.',
       stateKey: 'autoScroll',
       statusKey: 'autoScroll'
     }));
 
     body.appendChild(createFeatureCard({
+      title: 'Auto Chapter',
+      description: 'После конца страницы открывает следующую главу. Работает вместе с автоскроллом или при ручной прокрутке до конца.',
+      stateKey: 'autoChapterSwitch',
+      statusKey: 'autoChapterSwitch'
+    }));
+
+    body.appendChild(createFeatureCard({
+      title: 'Auto Likes',
+      description: 'Ставит один лайк на каждую новую главу по id из кнопки лайка в ридере.',
+      stateKey: 'autoLikes',
+      statusKey: 'autoLikes'
+    }));
+
+    body.appendChild(createFeatureCard({
+      title: 'Auto Comments',
+      description: 'Отправляет один короткий комментарий через заданное число глав.',
+      stateKey: 'autoComments',
+      statusKey: 'autoComments'
+    }));
+
+    body.appendChild(createFeatureCard({
       title: 'AutoMine',
-      description: 'Шлёт XHR POST на /mine/hit, а при лимите или ошибке 403 автоматически выключается.',
+      description: 'Шлёт XHR POST на /mine/hit, а при 403 пытается использовать штатную кнопку удара.',
       stateKey: 'autoMine',
       statusKey: 'autoMine'
     }));
@@ -958,7 +1034,7 @@
 
     const note = document.createElement('div');
     note.className = 'mb-helper-note';
-    note.textContent = 'Комментарии отправляются случайно раз в 2 или 4 главы. Если кнопка "След. глава" исчезает, автоскролл выключается сам.';
+    note.textContent = 'Reader-функции вынесены в отдельные переключатели. Частоту комментариев можно менять в настройках автоскролла.';
 
     actions.appendChild(settingsButton);
     actions.appendChild(note);
@@ -991,6 +1067,16 @@
           <label for="mb-scroll-interval-number">Интервал между прокрутками (мс)</label>
           <input id="mb-scroll-interval-number" type="number" min="200" max="5000" step="100" value="${settings.scrollInterval}">
         </div>
+        <div class="mb-helper-field">
+          <label><input id="mb-auto-like-toggle" type="checkbox" ${settings.autoLikes ? 'checked' : ''}> Включить автолайки</label>
+        </div>
+        <div class="mb-helper-field">
+          <label><input id="mb-auto-comment-toggle" type="checkbox" ${settings.autoComments ? 'checked' : ''}> Включить автокомментарии</label>
+        </div>
+        <div class="mb-helper-field">
+          <label for="mb-comment-frequency-number">Комментарий раз в N глав</label>
+          <input id="mb-comment-frequency-number" type="number" min="1" max="50" step="1" value="${settings.commentEveryChapters}">
+        </div>
         <div class="mb-helper-modal-actions">
           <button class="mb-helper-button mb-helper-button--ghost" type="button" id="mb-modal-cancel">Закрыть</button>
           <button class="mb-helper-button mb-helper-button--primary" type="button" id="mb-modal-save">Сохранить</button>
@@ -1006,6 +1092,9 @@
     const rangeInput = modal.querySelector('#mb-scroll-step-range');
     const numberInput = modal.querySelector('#mb-scroll-step-number');
     const intervalInput = modal.querySelector('#mb-scroll-interval-number');
+    const autoLikeToggle = modal.querySelector('#mb-auto-like-toggle');
+    const autoCommentToggle = modal.querySelector('#mb-auto-comment-toggle');
+    const commentFrequencyInput = modal.querySelector('#mb-comment-frequency-number');
     const rangeValue = modal.querySelector('#mb-scroll-step-value');
     const saveButton = modal.querySelector('#mb-modal-save');
     const cancelButton = modal.querySelector('#mb-modal-cancel');
@@ -1032,6 +1121,9 @@
     function openModal() {
       syncScrollInputs(settings.scrollStep);
       intervalInput.value = String(settings.scrollInterval);
+      autoLikeToggle.checked = settings.autoLikes;
+      autoCommentToggle.checked = settings.autoComments;
+      commentFrequencyInput.value = String(settings.commentEveryChapters);
       backdrop.classList.add('is-open');
       modal.classList.add('is-open');
     }
@@ -1053,6 +1145,7 @@
     saveButton.addEventListener('click', () => {
       const nextStep = Number(numberInput.value);
       const nextInterval = Number(intervalInput.value);
+      const nextCommentFrequency = Number(commentFrequencyInput.value);
 
       if (!Number.isFinite(nextStep) || nextStep < 80 || nextStep > 1200) {
         alert('Сила прокрутки должна быть в диапазоне от 80 до 1200 px.');
@@ -1064,11 +1157,22 @@
         return;
       }
 
+      if (!Number.isFinite(nextCommentFrequency) || nextCommentFrequency < 1 || nextCommentFrequency > 50) {
+        alert('Частота комментариев должна быть в диапазоне от 1 до 50 глав.');
+        return;
+      }
+
       const scrollWasRunning = settings.autoScroll;
       settings.scrollStep = nextStep;
       settings.scrollInterval = nextInterval;
+      settings.autoLikes = autoLikeToggle.checked;
+      settings.autoComments = autoCommentToggle.checked;
+      settings.commentEveryChapters = nextCommentFrequency;
       saveSettings();
       closeModal();
+      updateCheckboxes();
+      updateReaderStatuses();
+      handleReaderChapterEntry();
 
       if (scrollWasRunning) {
         stopAutoScroll();
@@ -1077,6 +1181,7 @@
     });
 
     updateCheckboxes();
+    updateReaderStatuses();
   }
 
   function initFromSettings() {
@@ -1085,6 +1190,8 @@
     } else {
       setStatus('autoScroll', 'Выключен');
     }
+
+    updateReaderStatuses();
 
     if (settings.autoMine) {
       startAutoMine();
@@ -1103,7 +1210,9 @@
     buildUi();
     initFromSettings();
 
-    if (settings.autoScroll && isReaderPage()) {
+    window.addEventListener('scroll', handleReaderBottomReach, { passive: true });
+
+    if (isReaderPage()) {
       handleReaderChapterEntry();
     }
   }
