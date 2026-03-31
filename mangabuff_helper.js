@@ -909,7 +909,7 @@
 
     const title = document.createElement('h2');
     title.className = 'mb-helper-title';
-    title.textContent = 'Mangabuff-AutoQuiz';
+    title.textContent = 'Mangabuff-helper';
 
     const subtitle = document.createElement('p');
     subtitle.className = 'mb-helper-subtitle';
