@@ -94,6 +94,18 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }
 
+  function setResumeScrollFlag(enabled) {
+    if (enabled) {
+      localStorage.setItem(RESUME_SCROLL_KEY, '1');
+    } else {
+      localStorage.removeItem(RESUME_SCROLL_KEY);
+    }
+  }
+
+  function shouldResumeScroll() {
+    return localStorage.getItem(RESUME_SCROLL_KEY) === '1';
+  }
+
   function showToast(message, tone = 'info') {
     if (!toastContainer) {
       return;
@@ -375,7 +387,7 @@
     const nextChapterLink = getNextChapterLink();
     if (nextChapterLink?.href) {
       runtime.navigatingToNextChapter = true;
-      sessionStorage.setItem(RESUME_SCROLL_KEY, '1');
+      setResumeScrollFlag(true);
       setStatus('autoChapterSwitch', 'Переход к следующей главе');
       window.location.href = nextChapterLink.href;
       return true;
@@ -413,7 +425,7 @@
 
     if (settings.autoScroll && settings.autoChapterSwitch) {
       settings.autoScroll = false;
-      sessionStorage.removeItem(RESUME_SCROLL_KEY);
+      setResumeScrollFlag(false);
       saveSettings();
       updateCheckboxes();
       stopAutoScroll();
@@ -457,7 +469,7 @@
     runtime.bottomHits = 0;
     runtime.navigatingToNextChapter = false;
     if (!settings.autoScroll) {
-      sessionStorage.removeItem(RESUME_SCROLL_KEY);
+      setResumeScrollFlag(false);
     }
     setStatus('autoScroll', settings.autoScroll ? 'Пауза' : 'Выключен');
   }
@@ -1680,7 +1692,7 @@
   }
 
   function initFromSettings() {
-    const shouldResumeScroll = sessionStorage.getItem(RESUME_SCROLL_KEY) === '1';
+    const resumeScroll = shouldResumeScroll();
 
     if (settings.autoScroll) {
       ensureReaderAutomationReady();
@@ -1688,8 +1700,7 @@
       setStatus('autoScroll', 'Выключен');
     }
 
-    if (shouldResumeScroll && settings.autoScroll) {
-      sessionStorage.removeItem(RESUME_SCROLL_KEY);
+    if (resumeScroll && settings.autoScroll) {
       setStatus('autoScroll', 'Автоскролл продолжен');
       ensureReaderAutomationReady();
     }
