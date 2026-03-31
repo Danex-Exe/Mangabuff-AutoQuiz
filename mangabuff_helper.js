@@ -12,6 +12,7 @@
   'use strict';
 
   const STORAGE_KEY = 'mb_helper_settings_v2';
+  const RESUME_SCROLL_KEY = 'mb_helper_resume_scroll';
   const COMMENT_VARIANTS = [
     'Спасибо за главу',
     'Сябки',
@@ -39,6 +40,10 @@
     autoLikes: true,
     autoComments: true,
     autoMine: false,
+    quizAnswerDelay: 2000,
+    quizRetryDelay: 5000,
+    quizPageOnly: false,
+    chatUrl: `${location.origin}/chat`,
     scrollStep: 260,
     scrollInterval: 1200,
     commentEveryChapters: 2,
@@ -68,6 +73,7 @@
 
   let statusNodes = {};
   let controls = {};
+  let toastContainer = null;
 
   function loadSettings() {
     try {
@@ -81,6 +87,26 @@
 
   function saveSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }
+
+  function showToast(message, tone = 'info') {
+    if (!toastContainer) {
+      return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `mb-helper-toast mb-helper-toast--${tone}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+
+    window.setTimeout(() => {
+      toast.classList.add('is-visible');
+    }, 10);
+
+    window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => toast.remove(), 180);
+    }, 2600);
   }
 
   function getCsrfToken() {
@@ -251,6 +277,7 @@
     settings.lastLikedChapterKey = chapterKey;
     saveSettings();
     console.debug('[Mangabuff Helper] Chapter liked:', chapterId, data);
+    showToast('Автолайк поставлен', 'success');
   }
 
   function pickRandomComment() {
@@ -299,6 +326,7 @@
     settings.lastCommentedChapterKey = chapterKey;
     saveSettings();
     console.debug('[Mangabuff Helper] Comment sent:', commentText, data);
+    showToast(`Автокоммент: ${commentText}`, 'success');
     return true;
   }
 
@@ -342,6 +370,7 @@
     const nextChapterLink = getNextChapterLink();
     if (nextChapterLink?.href) {
       runtime.navigatingToNextChapter = true;
+      sessionStorage.setItem(RESUME_SCROLL_KEY, '1');
       setStatus('autoChapterSwitch', 'Переход к следующей главе');
       window.location.href = nextChapterLink.href;
       return true;
@@ -379,6 +408,7 @@
 
     if (settings.autoScroll && settings.autoChapterSwitch) {
       settings.autoScroll = false;
+      sessionStorage.removeItem(RESUME_SCROLL_KEY);
       saveSettings();
       updateCheckboxes();
       stopAutoScroll();
@@ -421,6 +451,9 @@
     }
     runtime.bottomHits = 0;
     runtime.navigatingToNextChapter = false;
+    if (!settings.autoScroll) {
+      sessionStorage.removeItem(RESUME_SCROLL_KEY);
+    }
     setStatus('autoScroll', settings.autoScroll ? 'Пауза' : 'Выключен');
   }
 
@@ -538,13 +571,15 @@
       throw new Error(`quiz/answer returned ${response.status}`);
     }
 
+    console.info('[Mangabuff Helper] Quiz answer sent successfully:', answer, data);
+
     if (data?.question?.correct_text) {
       setStatus('autoQuiz', 'Отправляю следующий ответ');
       return window.setTimeout(() => {
         if (settings.autoQuiz) {
           runAutoQuizStep(data.question.correct_text).catch(handleAutoQuizError);
         }
-      }, 2000);
+      }, settings.quizAnswerDelay);
     }
 
     runtime.autoQuizRunning = false;
@@ -569,7 +604,10 @@
 
   function scheduleAutoQuizRetry() {
     clearAutoQuizTimer();
-    if (!settings.autoQuiz) {
+    if (!settings.autoQuiz || (settings.quizPageOnly && !isQuizPage())) {
+      if (settings.autoQuiz && settings.quizPageOnly && !isQuizPage()) {
+        setStatus('autoQuiz', 'Ожидание страницы квиза');
+      }
       return;
     }
 
@@ -578,11 +616,16 @@
       if (settings.autoQuiz) {
         startAutoQuiz();
       }
-    }, 5000);
+    }, settings.quizRetryDelay);
   }
 
   async function startAutoQuiz() {
     if (runtime.autoQuizRunning) {
+      return;
+    }
+
+    if (settings.quizPageOnly && !isQuizPage()) {
+      setStatus('autoQuiz', 'Ожидание страницы квиза');
       return;
     }
 
@@ -603,12 +646,13 @@
       }
 
       setStatus('autoQuiz', 'Первый ответ получен');
+      console.info('[Mangabuff Helper] Quiz started successfully:', data);
       runtime.autoQuizTimer = window.setTimeout(() => {
         runtime.autoQuizTimer = null;
         if (settings.autoQuiz) {
           runAutoQuizStep(data.question.correct_text).catch(handleAutoQuizError);
         }
-      }, 2000);
+      }, settings.quizAnswerDelay);
     } catch (error) {
       handleAutoQuizError(error);
     }
@@ -618,6 +662,50 @@
     runtime.autoQuizRunning = false;
     clearAutoQuizTimer();
     setStatus('autoQuiz', settings.autoQuiz ? 'Пауза' : 'Выключен');
+  }
+
+  class ModalController {
+    constructor(backdrop, modal) {
+      this.backdrop = backdrop;
+      this.modal = modal;
+      this.onBackdropClick = this.close.bind(this);
+      this.backdrop.addEventListener('click', this.onBackdropClick);
+    }
+
+    open() {
+      this.backdrop.classList.add('is-open');
+      this.modal.classList.add('is-open');
+    }
+
+    close() {
+      this.backdrop.classList.remove('is-open');
+      this.modal.classList.remove('is-open');
+    }
+  }
+
+  class DrawerController {
+    constructor(drawer, toggle) {
+      this.drawer = drawer;
+      this.toggle = toggle;
+    }
+
+    open() {
+      this.drawer.classList.add('is-open');
+      this.toggle.classList.add('is-open');
+    }
+
+    close() {
+      this.drawer.classList.remove('is-open');
+      this.toggle.classList.remove('is-open');
+    }
+
+    toggleState() {
+      if (this.drawer.classList.contains('is-open')) {
+        this.close();
+      } else {
+        this.open();
+      }
+    }
   }
 
   function createStyles() {
@@ -779,13 +867,14 @@
         inset: 50% auto auto 50%;
         transform: translate(-50%, -50%);
         width: min(420px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
         z-index: 100001;
         display: none;
         border-radius: 24px;
         background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);
         border: 1px solid rgba(225, 181, 119, 0.4);
         box-shadow: 0 32px 70px rgba(37, 20, 8, 0.3);
-        overflow: hidden;
+        overflow: auto;
         font-family: "Segoe UI", "Trebuchet MS", sans-serif;
       }
 
@@ -816,6 +905,7 @@
         padding: 18px 20px 20px;
         display: grid;
         gap: 14px;
+        overflow: auto;
       }
 
       .mb-helper-field label {
@@ -865,6 +955,141 @@
         color: #2c1707;
       }
 
+      .mb-helper-toast-stack {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 100002;
+        display: grid;
+        gap: 10px;
+        pointer-events: none;
+      }
+
+      .mb-helper-toast {
+        min-width: 220px;
+        max-width: min(360px, calc(100vw - 36px));
+        padding: 12px 14px;
+        border-radius: 14px;
+        color: #fffdf8;
+        background: rgba(35, 22, 13, 0.92);
+        box-shadow: 0 18px 36px rgba(37, 20, 8, 0.2);
+        font-size: 13px;
+        line-height: 1.45;
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.18s ease, transform 0.18s ease;
+      }
+
+      .mb-helper-toast.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .mb-helper-toast--success {
+        background: linear-gradient(135deg, rgba(31, 105, 66, 0.96), rgba(44, 152, 95, 0.96));
+      }
+
+      .mb-helper-toast--warning {
+        background: linear-gradient(135deg, rgba(133, 77, 17, 0.96), rgba(196, 119, 35, 0.96));
+      }
+
+      .mb-helper-chat-toggle {
+        position: fixed;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 99997;
+        border: none;
+        border-radius: 16px 0 0 16px;
+        background: linear-gradient(135deg, #23160d, #4a2a12);
+        color: #fff7ef;
+        padding: 14px 10px;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: -10px 18px 30px rgba(37, 20, 8, 0.24);
+      }
+
+      .mb-helper-chat-toggle.is-open {
+        right: min(420px, calc(100vw - 24px));
+      }
+
+      .mb-helper-chat-drawer {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100vh;
+        width: min(420px, calc(100vw - 12px));
+        z-index: 99996;
+        background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);
+        border-left: 1px solid rgba(225, 181, 119, 0.4);
+        box-shadow: -22px 0 60px rgba(37, 20, 8, 0.18);
+        transform: translateX(100%);
+        transition: transform 0.2s ease;
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+      }
+
+      .mb-helper-chat-drawer.is-open {
+        transform: translateX(0);
+      }
+
+      .mb-helper-chat-head {
+        padding: 16px 18px;
+        background: linear-gradient(135deg, #23160d, #4a2a12);
+        color: #fff7ef;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .mb-helper-chat-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 800;
+      }
+
+      .mb-helper-chat-text {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: rgba(255, 247, 239, 0.82);
+      }
+
+      .mb-helper-chat-close {
+        border: none;
+        border-radius: 10px;
+        width: 32px;
+        height: 32px;
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff7ef;
+        cursor: pointer;
+      }
+
+      .mb-helper-chat-actions {
+        padding: 14px 18px;
+        display: grid;
+        gap: 10px;
+        border-bottom: 1px solid rgba(225, 181, 119, 0.32);
+      }
+
+      .mb-helper-chat-actions input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(152, 95, 35, 0.26);
+      }
+
+      .mb-helper-chat-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #fff;
+      }
+
       @media (max-width: 640px) {
         .mb-helper-launcher,
         .mb-helper-panel {
@@ -874,6 +1099,10 @@
 
         .mb-helper-panel {
           width: calc(100vw - 24px);
+        }
+
+        .mb-helper-chat-toggle.is-open {
+          right: calc(100vw - 12px);
         }
       }
     `;
@@ -946,6 +1175,14 @@
     });
 
     return card;
+  }
+
+  function createActionButton(label) {
+    const button = document.createElement('button');
+    button.className = 'mb-helper-secondary';
+    button.type = 'button';
+    button.textContent = label;
+    return button;
   }
 
   function buildUi() {
@@ -1027,16 +1264,17 @@
     const actions = document.createElement('div');
     actions.className = 'mb-helper-actions';
 
-    const settingsButton = document.createElement('button');
-    settingsButton.className = 'mb-helper-secondary';
-    settingsButton.type = 'button';
-    settingsButton.textContent = 'Настроить автоскролл';
+    const scrollSettingsButton = createActionButton('Настроить автоскролл');
+    const quizSettingsButton = createActionButton('Настроить автоквиз');
+    const commentsSettingsButton = createActionButton('Настроить автокомменты');
 
     const note = document.createElement('div');
     note.className = 'mb-helper-note';
-    note.textContent = 'Reader-функции вынесены в отдельные переключатели. Частоту комментариев можно менять в настройках автоскролла.';
+    note.textContent = 'Модалки разделены по смыслу: скролл, квиз и комментарии. Встроенный чат открывается справа отдельной вкладкой.';
 
-    actions.appendChild(settingsButton);
+    actions.appendChild(scrollSettingsButton);
+    actions.appendChild(quizSettingsButton);
+    actions.appendChild(commentsSettingsButton);
     actions.appendChild(note);
     body.appendChild(actions);
 
@@ -1045,11 +1283,12 @@
 
     const backdrop = document.createElement('div');
     backdrop.className = 'mb-helper-backdrop';
+    toastContainer = document.createElement('div');
+    toastContainer.className = 'mb-helper-toast-stack';
 
-    const modal = document.createElement('section');
-    modal.className = 'mb-helper-modal';
-
-    modal.innerHTML = `
+    const scrollModal = document.createElement('section');
+    scrollModal.className = 'mb-helper-modal';
+    scrollModal.innerHTML = `
       <div class="mb-helper-modal-head">
         <h3 class="mb-helper-modal-title">Параметры автоскролла</h3>
         <p class="mb-helper-modal-text">Сила прокрутки отвечает за высоту шага за один тик. Чем больше число, тем быстрее страница уходит вниз.</p>
@@ -1067,6 +1306,47 @@
           <label for="mb-scroll-interval-number">Интервал между прокрутками (мс)</label>
           <input id="mb-scroll-interval-number" type="number" min="200" max="5000" step="100" value="${settings.scrollInterval}">
         </div>
+        <div class="mb-helper-modal-actions">
+          <button class="mb-helper-button mb-helper-button--ghost" type="button" id="mb-scroll-cancel">Закрыть</button>
+          <button class="mb-helper-button mb-helper-button--primary" type="button" id="mb-scroll-save">Сохранить</button>
+        </div>
+      </div>
+    `;
+
+    const quizModal = document.createElement('section');
+    quizModal.className = 'mb-helper-modal';
+    quizModal.innerHTML = `
+      <div class="mb-helper-modal-head">
+        <h3 class="mb-helper-modal-title">Параметры автоквиза</h3>
+        <p class="mb-helper-modal-text">Здесь можно настроить задержку между ответами, повторный запуск и опциональное ожидание страницы квиза.</p>
+      </div>
+      <div class="mb-helper-modal-body">
+        <div class="mb-helper-field">
+          <label for="mb-quiz-answer-delay">Задержка между ответами (мс)</label>
+          <input id="mb-quiz-answer-delay" type="number" min="500" max="10000" step="100" value="${settings.quizAnswerDelay}">
+        </div>
+        <div class="mb-helper-field">
+          <label for="mb-quiz-retry-delay">Повторный запуск квиза (мс)</label>
+          <input id="mb-quiz-retry-delay" type="number" min="1000" max="30000" step="500" value="${settings.quizRetryDelay}">
+        </div>
+        <div class="mb-helper-field">
+          <label><input id="mb-quiz-page-only" type="checkbox" ${settings.quizPageOnly ? 'checked' : ''}> Запускать только на странице квиза</label>
+        </div>
+        <div class="mb-helper-modal-actions">
+          <button class="mb-helper-button mb-helper-button--ghost" type="button" id="mb-quiz-cancel">Закрыть</button>
+          <button class="mb-helper-button mb-helper-button--primary" type="button" id="mb-quiz-save">Сохранить</button>
+        </div>
+      </div>
+    `;
+
+    const commentsModal = document.createElement('section');
+    commentsModal.className = 'mb-helper-modal';
+    commentsModal.innerHTML = `
+      <div class="mb-helper-modal-head">
+        <h3 class="mb-helper-modal-title">Параметры автокомментов</h3>
+        <p class="mb-helper-modal-text">Управляйте автолайками, автокомментариями и частотой отправки комментариев по главам.</p>
+      </div>
+      <div class="mb-helper-modal-body">
         <div class="mb-helper-field">
           <label><input id="mb-auto-like-toggle" type="checkbox" ${settings.autoLikes ? 'checked' : ''}> Включить автолайки</label>
         </div>
@@ -1078,26 +1358,72 @@
           <input id="mb-comment-frequency-number" type="number" min="1" max="50" step="1" value="${settings.commentEveryChapters}">
         </div>
         <div class="mb-helper-modal-actions">
-          <button class="mb-helper-button mb-helper-button--ghost" type="button" id="mb-modal-cancel">Закрыть</button>
-          <button class="mb-helper-button mb-helper-button--primary" type="button" id="mb-modal-save">Сохранить</button>
+          <button class="mb-helper-button mb-helper-button--ghost" type="button" id="mb-comments-cancel">Закрыть</button>
+          <button class="mb-helper-button mb-helper-button--primary" type="button" id="mb-comments-save">Сохранить</button>
         </div>
       </div>
+    `;
+
+    const chatToggle = document.createElement('button');
+    chatToggle.className = 'mb-helper-chat-toggle';
+    chatToggle.type = 'button';
+    chatToggle.textContent = 'Чат';
+
+    const chatDrawer = document.createElement('aside');
+    chatDrawer.className = 'mb-helper-chat-drawer';
+    chatDrawer.innerHTML = `
+      <div class="mb-helper-chat-head">
+        <div>
+          <p class="mb-helper-chat-title">Встроенный чат</p>
+          <p class="mb-helper-chat-text">Открывает чат Mangabuff во встроенной панели без автоматизации сообщений.</p>
+        </div>
+        <button class="mb-helper-chat-close" type="button" id="mb-chat-close">✕</button>
+      </div>
+      <div class="mb-helper-chat-actions">
+        <input id="mb-chat-url" type="text" value="${settings.chatUrl}">
+        <button class="mb-helper-secondary" type="button" id="mb-chat-open-link">Открыть чат в новой вкладке</button>
+      </div>
+      <iframe id="mb-chat-frame" class="mb-helper-chat-frame" src="${settings.chatUrl}" referrerpolicy="no-referrer"></iframe>
     `;
 
     document.body.appendChild(launcher);
     document.body.appendChild(panel);
     document.body.appendChild(backdrop);
-    document.body.appendChild(modal);
+    document.body.appendChild(toastContainer);
+    document.body.appendChild(scrollModal);
+    document.body.appendChild(quizModal);
+    document.body.appendChild(commentsModal);
+    document.body.appendChild(chatToggle);
+    document.body.appendChild(chatDrawer);
 
-    const rangeInput = modal.querySelector('#mb-scroll-step-range');
-    const numberInput = modal.querySelector('#mb-scroll-step-number');
-    const intervalInput = modal.querySelector('#mb-scroll-interval-number');
-    const autoLikeToggle = modal.querySelector('#mb-auto-like-toggle');
-    const autoCommentToggle = modal.querySelector('#mb-auto-comment-toggle');
-    const commentFrequencyInput = modal.querySelector('#mb-comment-frequency-number');
-    const rangeValue = modal.querySelector('#mb-scroll-step-value');
-    const saveButton = modal.querySelector('#mb-modal-save');
-    const cancelButton = modal.querySelector('#mb-modal-cancel');
+    const scrollModalController = new ModalController(backdrop, scrollModal);
+    const quizModalController = new ModalController(backdrop, quizModal);
+    const commentsModalController = new ModalController(backdrop, commentsModal);
+    const chatDrawerController = new DrawerController(chatDrawer, chatToggle);
+
+    const rangeInput = scrollModal.querySelector('#mb-scroll-step-range');
+    const numberInput = scrollModal.querySelector('#mb-scroll-step-number');
+    const intervalInput = scrollModal.querySelector('#mb-scroll-interval-number');
+    const rangeValue = scrollModal.querySelector('#mb-scroll-step-value');
+    const scrollSaveButton = scrollModal.querySelector('#mb-scroll-save');
+    const scrollCancelButton = scrollModal.querySelector('#mb-scroll-cancel');
+
+    const quizAnswerDelayInput = quizModal.querySelector('#mb-quiz-answer-delay');
+    const quizRetryDelayInput = quizModal.querySelector('#mb-quiz-retry-delay');
+    const quizPageOnlyToggle = quizModal.querySelector('#mb-quiz-page-only');
+    const quizSaveButton = quizModal.querySelector('#mb-quiz-save');
+    const quizCancelButton = quizModal.querySelector('#mb-quiz-cancel');
+
+    const autoLikeToggle = commentsModal.querySelector('#mb-auto-like-toggle');
+    const autoCommentToggle = commentsModal.querySelector('#mb-auto-comment-toggle');
+    const commentFrequencyInput = commentsModal.querySelector('#mb-comment-frequency-number');
+    const commentsSaveButton = commentsModal.querySelector('#mb-comments-save');
+    const commentsCancelButton = commentsModal.querySelector('#mb-comments-cancel');
+
+    const chatUrlInput = chatDrawer.querySelector('#mb-chat-url');
+    const chatFrame = chatDrawer.querySelector('#mb-chat-frame');
+    const chatCloseButton = chatDrawer.querySelector('#mb-chat-close');
+    const chatOpenLinkButton = chatDrawer.querySelector('#mb-chat-open-link');
 
     controls.scrollStep = numberInput;
 
@@ -1118,34 +1444,60 @@
       launcher.style.display = '';
     }
 
-    function openModal() {
+    function openScrollModal() {
       syncScrollInputs(settings.scrollStep);
       intervalInput.value = String(settings.scrollInterval);
+      scrollModalController.open();
+    }
+
+    function openQuizModal() {
+      quizAnswerDelayInput.value = String(settings.quizAnswerDelay);
+      quizRetryDelayInput.value = String(settings.quizRetryDelay);
+      quizPageOnlyToggle.checked = settings.quizPageOnly;
+      quizModalController.open();
+    }
+
+    function openCommentsModal() {
       autoLikeToggle.checked = settings.autoLikes;
       autoCommentToggle.checked = settings.autoComments;
       commentFrequencyInput.value = String(settings.commentEveryChapters);
-      backdrop.classList.add('is-open');
-      modal.classList.add('is-open');
-    }
-
-    function closeModal() {
-      backdrop.classList.remove('is-open');
-      modal.classList.remove('is-open');
+      commentsModalController.open();
     }
 
     launcher.addEventListener('click', openPanel);
     closeButton.addEventListener('click', closePanel);
-    settingsButton.addEventListener('click', openModal);
-    backdrop.addEventListener('click', closeModal);
-    cancelButton.addEventListener('click', closeModal);
+    scrollSettingsButton.addEventListener('click', openScrollModal);
+    quizSettingsButton.addEventListener('click', openQuizModal);
+    commentsSettingsButton.addEventListener('click', openCommentsModal);
+    scrollCancelButton.addEventListener('click', () => scrollModalController.close());
+    quizCancelButton.addEventListener('click', () => quizModalController.close());
+    commentsCancelButton.addEventListener('click', () => commentsModalController.close());
+    chatToggle.addEventListener('click', () => chatDrawerController.toggleState());
+    chatCloseButton.addEventListener('click', () => chatDrawerController.close());
+
+    chatOpenLinkButton.addEventListener('click', () => {
+      const nextChatUrl = chatUrlInput.value.trim() || settings.chatUrl;
+      settings.chatUrl = nextChatUrl;
+      saveSettings();
+      window.open(nextChatUrl, '_blank', 'noopener,noreferrer');
+    });
+
+    chatUrlInput.addEventListener('change', () => {
+      const nextChatUrl = chatUrlInput.value.trim();
+      if (!nextChatUrl) {
+        return;
+      }
+      settings.chatUrl = nextChatUrl;
+      saveSettings();
+      chatFrame.src = nextChatUrl;
+    });
 
     rangeInput.addEventListener('input', () => syncScrollInputs(rangeInput.value));
     numberInput.addEventListener('input', () => syncScrollInputs(numberInput.value));
 
-    saveButton.addEventListener('click', () => {
+    scrollSaveButton.addEventListener('click', () => {
       const nextStep = Number(numberInput.value);
       const nextInterval = Number(intervalInput.value);
-      const nextCommentFrequency = Number(commentFrequencyInput.value);
 
       if (!Number.isFinite(nextStep) || nextStep < 80 || nextStep > 1200) {
         alert('Сила прокрутки должна быть в диапазоне от 80 до 1200 px.');
@@ -1157,22 +1509,12 @@
         return;
       }
 
-      if (!Number.isFinite(nextCommentFrequency) || nextCommentFrequency < 1 || nextCommentFrequency > 50) {
-        alert('Частота комментариев должна быть в диапазоне от 1 до 50 глав.');
-        return;
-      }
-
       const scrollWasRunning = settings.autoScroll;
       settings.scrollStep = nextStep;
       settings.scrollInterval = nextInterval;
-      settings.autoLikes = autoLikeToggle.checked;
-      settings.autoComments = autoCommentToggle.checked;
-      settings.commentEveryChapters = nextCommentFrequency;
       saveSettings();
-      closeModal();
+      scrollModalController.close();
       updateCheckboxes();
-      updateReaderStatuses();
-      handleReaderChapterEntry();
 
       if (scrollWasRunning) {
         stopAutoScroll();
@@ -1180,15 +1522,61 @@
       }
     });
 
+    quizSaveButton.addEventListener('click', () => {
+      const nextAnswerDelay = Number(quizAnswerDelayInput.value);
+      const nextRetryDelay = Number(quizRetryDelayInput.value);
+
+      if (!Number.isFinite(nextAnswerDelay) || nextAnswerDelay < 500 || nextAnswerDelay > 10000) {
+        alert('Задержка между ответами должна быть в диапазоне от 500 до 10000 мс.');
+        return;
+      }
+
+      if (!Number.isFinite(nextRetryDelay) || nextRetryDelay < 1000 || nextRetryDelay > 30000) {
+        alert('Задержка повторного запуска должна быть в диапазоне от 1000 до 30000 мс.');
+        return;
+      }
+
+      settings.quizAnswerDelay = nextAnswerDelay;
+      settings.quizRetryDelay = nextRetryDelay;
+      settings.quizPageOnly = quizPageOnlyToggle.checked;
+      saveSettings();
+      quizModalController.close();
+    });
+
+    commentsSaveButton.addEventListener('click', () => {
+      const nextCommentFrequency = Number(commentFrequencyInput.value);
+
+      if (!Number.isFinite(nextCommentFrequency) || nextCommentFrequency < 1 || nextCommentFrequency > 50) {
+        alert('Частота комментариев должна быть в диапазоне от 1 до 50 глав.');
+        return;
+      }
+
+      settings.autoLikes = autoLikeToggle.checked;
+      settings.autoComments = autoCommentToggle.checked;
+      settings.commentEveryChapters = nextCommentFrequency;
+      saveSettings();
+      commentsModalController.close();
+      updateCheckboxes();
+      updateReaderStatuses();
+      handleReaderChapterEntry();
+    });
+
     updateCheckboxes();
     updateReaderStatuses();
   }
 
   function initFromSettings() {
+    const shouldResumeScroll = sessionStorage.getItem(RESUME_SCROLL_KEY) === '1';
+
     if (settings.autoScroll) {
       startAutoScroll();
     } else {
       setStatus('autoScroll', 'Выключен');
+    }
+
+    if (shouldResumeScroll && settings.autoScroll) {
+      sessionStorage.removeItem(RESUME_SCROLL_KEY);
+      setStatus('autoScroll', 'Автоскролл продолжен');
     }
 
     updateReaderStatuses();

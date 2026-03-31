@@ -4,7 +4,7 @@
 
 ## Mangabuff-helper
 
-`Mangabuff-helper` is a Tampermonkey userscript for `mangabuff.ru` that combines quiz automation, reader automation, and mine automation in one control panel.
+`Mangabuff-helper` is a Tampermonkey userscript for `mangabuff.ru` that combines quiz automation, reader automation, mine automation, a built-in chat drawer, and local toast notifications in one control panel.
 
 ## Files
 
@@ -20,9 +20,15 @@ The reader automation is split into independent modules:
 - `Auto Chapter`
   Switches to the next chapter when the bottom of the page is reached.
 - `Auto Likes`
-  Sends one `/favourite` request for each new chapter.
+  Sends one `/favourite` request for each new chapter and shows a toast notification.
 - `Auto Comments`
-  Sends one short comment every `N` chapters, where `N` is configurable in the settings modal.
+  Sends one short comment every `N` chapters and shows a toast notification.
+
+## Behavior
+
+- When auto-scroll switches to the next chapter, the scroll state is preserved and continues on the next chapter.
+- Successful quiz answers are logged to the browser console.
+- Like and comment events are shown as local popup notifications.
 
 ## Other Modules
 
@@ -30,6 +36,8 @@ The reader automation is split into independent modules:
   Starts the quiz flow, reads `correct_text` from the API response, and keeps answering while the quiz is active.
 - `AutoMine`
   Sends `POST /mine/hit` through XHR. If the endpoint returns `403`, the script falls back to the visible mine button when possible.
+- `Built-in Chat`
+  Opens a right-side drawer with an embedded chat page loaded in an `iframe`.
 
 ## Installation
 
@@ -39,15 +47,15 @@ The reader automation is split into independent modules:
 4. Save the script.
 5. Open `mangabuff.ru` and use the `MB` button in the lower-left corner.
 
-## Reader Settings
+## Settings
 
-In the scroll settings modal you can configure:
+The script includes separate modal windows for:
 
-- scroll strength in pixels per step;
-- interval between scroll ticks in milliseconds;
-- auto likes on or off;
-- auto comments on or off;
-- comment frequency in chapters.
+- auto-scroll;
+- auto-quiz;
+- auto-comments.
+
+Reader-related notifications appear in the lower-right corner of the page.
 
 ## Notes
 
