@@ -1,44 +1,62 @@
-<h1 align="center">Documentation</h1>
-<div align="center">
-    <a href="README.md">English</a>
-    <a href="ru/README_RU.md">Русский</a>
-    <br><br>
-</div>
+﻿# Documentation
 
-# Mangabuff Quiz Auto Answer
+[English](./README.md) | [Русский](./ru/README_ru.md)
 
-A Tampermonkey userscript that automatically completes quizzes on [mangabuff.ru/quiz](https://mangabuff.ru/quiz) by sending the correct answer for each question.
+## Mangabuff Helper
+
+`Mangabuff Helper` is a Tampermonkey userscript for `mangabuff.ru` that combines quiz automation, chapter auto-scrolling, chapter likes and comments, and mine automation in one control panel.
+
+## Files
+
+- `../mangabuff_helper.js` is the only working userscript in the repository.
+- `../mangabuff_autoquiz.js` is a legacy compatibility stub. The autoquiz logic was merged into `mangabuff_helper.js` and should not be installed separately.
 
 ## Features
 
-- Automatically starts a quiz on page load.
-- Extracts the correct answer from the server’s response.
-- Sends the answer with a configurable delay.
-- Loops through all questions until the quiz is complete.
+- `AutoQuiz`
+  Starts a quiz on supported quiz pages, reads `correct_text` from the API response, and keeps answering until the quiz ends.
+- `AutoScroll`
+  Works on reader pages, scrolls the chapter, finds the next chapter button in the footer, opens the next chapter, and disables itself when there is no next chapter.
+- `Auto Like`
+  While auto-scroll is active, the script sends one `/favourite` request for each chapter using the chapter id from the reader like button.
+- `Auto Comment`
+  While auto-scroll is active, the script tries to send one random short comment every 2 or 4 chapters.
+- `AutoMine`
+  Sends `POST /mine/hit` through XHR and disables itself if the request fails or the daily limit is reached.
+- `Control Panel`
+  Shows checkboxes, live statuses, and a modal for tuning scroll strength and scroll interval.
 
 ## Installation
 
-1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension if you haven’t already.
-2. Click the Tampermonkey icon, select **“Create a new script”**.
-3. Replace the default code with the full script (see below).
-4. Save the script (Ctrl+S or File → Save).
-5. Navigate to `https://mangabuff.ru/quiz` – the script will run automatically.
+1. Install [Tampermonkey](https://www.tampermonkey.net/).
+2. Create a new userscript.
+3. Copy the contents of [`../mangabuff_helper.js`](../mangabuff_helper.js) into it.
+4. Save the script.
+5. Open `mangabuff.ru` and use the `MB` button in the lower-left corner.
 
-## Logging
+## Usage
 
-The script logs its actions to the browser console (F12 → Console tab). You can see:
-- When the quiz starts and the first answer.
-- Each answer sent and the server’s response.
-- Any rate‑limit delays.
-- Errors, if they occur.
+1. Open any page on `mangabuff.ru`.
+2. Click the `MB` floating button.
+3. Enable the modules you want.
+4. For chapter pages, open the auto-scroll settings modal and adjust:
+   - scroll strength in pixels per step;
+   - interval between scroll ticks in milliseconds.
 
-## How It Works
+## Reader Flow
 
-1. When the page loads, the script sends a POST request to /quiz/start to begin the quiz.
-2. From the response, it extracts the correct answer (correct_text).
-3. After a short initial delay (2 seconds), it sends the answer to /quiz/answer.
-4. The loop continues until no new question is provided (quiz finished).
+On supported chapter pages the script:
 
-## Disclaimer
+1. Detects the current chapter id from `.reader-menu__item--like`.
+2. Sends one like request for that chapter.
+3. Counts chapters and randomly decides whether to comment on the 2nd or 4th chapter.
+4. Scrolls until the footer is reached.
+5. Follows the `След. глава` link if present.
+6. Disables auto-scroll when no next chapter link is available.
 
-Use this script responsibly. Automating actions on a website may violate its terms of service. This script is provided for educational purposes only.
+## Notes
+
+- The script depends on the current DOM structure and API behavior of `mangabuff.ru`.
+- If the site changes class names, request payloads, or footer markup, some features may stop working until updated.
+- Comment posting can still be rejected by the website spam filter.
+- Automating actions on a website may violate its rules. Use the script at your own risk.
