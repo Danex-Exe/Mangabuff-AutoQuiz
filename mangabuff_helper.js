@@ -63,6 +63,7 @@
     autoQuizTimer: null,
     autoScrollInterval: null,
     autoMineInterval: null,
+    readerReadyObserver: null,
     bottomHits: 0,
     navigatingToNextChapter: false,
     status: {
@@ -762,6 +763,50 @@
     window.setTimeout(() => {
       scheduleReaderResume(attempt + 1);
     }, 500);
+  }
+
+  function ensureReaderAutomationReady() {
+    if (!settings.autoScroll) {
+      return;
+    }
+
+    if (isReaderPage()) {
+      if (!runtime.autoScrollInterval) {
+        startAutoScroll();
+      } else {
+        handleReaderChapterEntry();
+      }
+      return;
+    }
+
+    if (runtime.readerReadyObserver || !document.body) {
+      return;
+    }
+
+    runtime.readerReadyObserver = new MutationObserver(() => {
+      if (!settings.autoScroll || !isReaderPage()) {
+        return;
+      }
+
+      runtime.readerReadyObserver.disconnect();
+      runtime.readerReadyObserver = null;
+      startAutoScroll();
+    });
+
+    runtime.readerReadyObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    window.setTimeout(() => {
+      if (runtime.readerReadyObserver) {
+        runtime.readerReadyObserver.disconnect();
+        runtime.readerReadyObserver = null;
+      }
+      if (settings.autoScroll && !runtime.autoScrollInterval) {
+        scheduleReaderResume();
+      }
+    }, 15000);
   }
 
   function createStyles() {
@@ -1637,10 +1682,8 @@
   function initFromSettings() {
     const shouldResumeScroll = sessionStorage.getItem(RESUME_SCROLL_KEY) === '1';
 
-    if (settings.autoScroll && isReaderPage()) {
-      startAutoScroll();
-    } else if (settings.autoScroll) {
-      scheduleReaderResume();
+    if (settings.autoScroll) {
+      ensureReaderAutomationReady();
     } else {
       setStatus('autoScroll', 'Выключен');
     }
@@ -1648,9 +1691,7 @@
     if (shouldResumeScroll && settings.autoScroll) {
       sessionStorage.removeItem(RESUME_SCROLL_KEY);
       setStatus('autoScroll', 'Автоскролл продолжен');
-      if (!isReaderPage()) {
-        scheduleReaderResume();
-      }
+      ensureReaderAutomationReady();
     }
 
     updateReaderStatuses();
@@ -1673,6 +1714,11 @@
     initFromSettings();
 
     window.addEventListener('scroll', handleReaderBottomReach, { passive: true });
+    window.addEventListener('pageshow', () => {
+      if (settings.autoScroll) {
+        ensureReaderAutomationReady();
+      }
+    });
 
     if (isReaderPage()) {
       handleReaderChapterEntry();
