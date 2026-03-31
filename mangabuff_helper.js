@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Mangabuff-helper
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.1.0
 // @description  Autoquiz, autoscroll, automine and reader helpers for mangabuff.ru
 // @author       DanexExe
 // @match        *://mangabuff.ru/*
@@ -10,6 +10,10 @@
 
 (function() {
   'use strict';
+
+  if (window.self !== window.top) {
+    return;
+  }
 
   const STORAGE_KEY = 'mb_helper_settings_v2';
   const RESUME_SCROLL_KEY = 'mb_helper_resume_scroll';
@@ -708,6 +712,58 @@
     }
   }
 
+  function addModalScrollControls(modal) {
+    const body = modal.querySelector('.mb-helper-modal-body');
+    if (!body) {
+      return;
+    }
+
+    const controlsBar = document.createElement('div');
+    controlsBar.className = 'mb-helper-modal-scrollbar';
+
+    const upButton = document.createElement('button');
+    upButton.className = 'mb-helper-button mb-helper-button--ghost';
+    upButton.type = 'button';
+    upButton.textContent = 'Прокрутить вверх';
+
+    const downButton = document.createElement('button');
+    downButton.className = 'mb-helper-button mb-helper-button--ghost';
+    downButton.type = 'button';
+    downButton.textContent = 'Прокрутить вниз';
+
+    upButton.addEventListener('click', () => {
+      body.scrollBy({ top: -220, behavior: 'smooth' });
+    });
+
+    downButton.addEventListener('click', () => {
+      body.scrollBy({ top: 220, behavior: 'smooth' });
+    });
+
+    controlsBar.appendChild(upButton);
+    controlsBar.appendChild(downButton);
+    modal.appendChild(controlsBar);
+  }
+
+  function scheduleReaderResume(attempt = 0) {
+    if (isReaderPage()) {
+      if (settings.autoScroll) {
+        startAutoScroll();
+      } else {
+        handleReaderChapterEntry();
+      }
+      return;
+    }
+
+    if (attempt >= 30) {
+      setStatus('autoScroll', 'Ожидание страницы главы');
+      return;
+    }
+
+    window.setTimeout(() => {
+      scheduleReaderResume(attempt + 1);
+    }, 500);
+  }
+
   function createStyles() {
     const style = document.createElement('style');
     style.textContent = `
@@ -870,16 +926,17 @@
         max-height: calc(100vh - 24px);
         z-index: 100001;
         display: none;
+        grid-template-rows: auto minmax(0, 1fr) auto;
         border-radius: 24px;
         background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);
         border: 1px solid rgba(225, 181, 119, 0.4);
         box-shadow: 0 32px 70px rgba(37, 20, 8, 0.3);
-        overflow: auto;
+        overflow: hidden;
         font-family: "Segoe UI", "Trebuchet MS", sans-serif;
       }
 
       .mb-helper-modal.is-open {
-        display: block;
+        display: grid;
       }
 
       .mb-helper-modal-head {
@@ -905,7 +962,8 @@
         padding: 18px 20px 20px;
         display: grid;
         gap: 14px;
-        overflow: auto;
+        overflow-y: auto;
+        min-height: 0;
       }
 
       .mb-helper-field label {
@@ -934,6 +992,13 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
+      }
+
+      .mb-helper-modal-scrollbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 0 20px 18px;
       }
 
       .mb-helper-button {
@@ -1396,6 +1461,10 @@
     document.body.appendChild(chatToggle);
     document.body.appendChild(chatDrawer);
 
+    addModalScrollControls(scrollModal);
+    addModalScrollControls(quizModal);
+    addModalScrollControls(commentsModal);
+
     const scrollModalController = new ModalController(backdrop, scrollModal);
     const quizModalController = new ModalController(backdrop, quizModal);
     const commentsModalController = new ModalController(backdrop, commentsModal);
@@ -1568,8 +1637,10 @@
   function initFromSettings() {
     const shouldResumeScroll = sessionStorage.getItem(RESUME_SCROLL_KEY) === '1';
 
-    if (settings.autoScroll) {
+    if (settings.autoScroll && isReaderPage()) {
       startAutoScroll();
+    } else if (settings.autoScroll) {
+      scheduleReaderResume();
     } else {
       setStatus('autoScroll', 'Выключен');
     }
@@ -1577,6 +1648,9 @@
     if (shouldResumeScroll && settings.autoScroll) {
       sessionStorage.removeItem(RESUME_SCROLL_KEY);
       setStatus('autoScroll', 'Автоскролл продолжен');
+      if (!isReaderPage()) {
+        scheduleReaderResume();
+      }
     }
 
     updateReaderStatuses();

@@ -6,14 +6,16 @@
 
 `Mangabuff-helper` is a Tampermonkey userscript for `mangabuff.ru` that combines quiz automation, reader automation, mine automation, a built-in chat drawer, and local toast notifications in one control panel.
 
+## Version
+
+Current userscript version: `2.1.0`
+
 ## Files
 
 - `../mangabuff_helper.js` is the only working userscript in the repository.
 - `../mangabuff_autoquiz.js` is a legacy compatibility stub. The real logic was merged into `mangabuff_helper.js`.
 
 ## Reader Modules
-
-The reader automation is split into independent modules:
 
 - `AutoScroll`
   Scrolls the chapter page with configurable strength and interval.
@@ -26,9 +28,10 @@ The reader automation is split into independent modules:
 
 ## Behavior
 
-- When auto-scroll switches to the next chapter, the scroll state is preserved and continues on the next chapter.
+- When auto-scroll switches to the next chapter, the script preserves the scroll state and retries startup on the new page until the reader markup becomes available.
 - Successful quiz answers are logged to the browser console.
 - Like and comment events are shown as local popup notifications.
+- The script does not run inside embedded iframes, so the built-in chat drawer does not recursively load new helper instances.
 
 ## Other Modules
 
@@ -55,7 +58,7 @@ The script includes separate modal windows for:
 - auto-quiz;
 - auto-comments.
 
-Reader-related notifications appear in the lower-right corner of the page.
+Each modal supports internal scrolling, and also includes scroll buttons if browser wheel scrolling is unreliable.
 
 ## Notes
 
